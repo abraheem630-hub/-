@@ -1,0 +1,6 @@
+{
+  "name": "سامي الفلاحي | خدمات المواطن",
+  "description": "منصة سامي الفلاحي لخدمات المواطنين - استقبال ومتابعة الطلبات والشكاوى والبلاغات والخدمات الاجتماعية وفرص العمل",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

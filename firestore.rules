@@ -1,0 +1,198 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Core Helper & Authorization Functions
+    // =========================================================================
+
+    // Verify user is authenticated with Firebase Auth
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Verify the caller matches the user ID directly
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Verify whether document resource belongs to user via userId field
+    function isDocOwner() {
+      return isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Verify whether incoming write document is explicitly assigned to user
+    function isIncomingOwner() {
+      return isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Full Administrative Check:
+    // 1. Primary Owner Email (abraheem630@gmail.com)
+    // 2. User has role == 'admin' in the 'users' collection
+    // 3. User email is registered and active in 'adminUsers' collection
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'abraheem630@gmail.com') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (request.auth.token.email != null &&
+         exists(/databases/$(database)/documents/adminUsers/$(request.auth.token.email.lower())) &&
+         get(/databases/$(database)/documents/adminUsers/$(request.auth.token.email.lower())).data.active == true)
+      );
+    }
+
+    // =========================================================================
+    // 1. users Collection
+    // Citizens: read and write their own document (where document ID matches UID)
+    // Admins: full access to all user profiles
+    // =========================================================================
+    match /users/{userId} {
+      allow read: if isAdmin() || isUser(userId);
+      allow create: if isAdmin() || (isUser(userId) && request.resource.data.role == 'citizen');
+      allow update: if isAdmin() || (isUser(userId) && request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 2. requests Collection (الطلبات الرسمية)
+    // Citizens: can only read/write requests where userId matches their UID
+    // Admins: full access to all requests
+    // =========================================================================
+    match /requests/{requestId} {
+      allow read: if isAdmin() || isDocOwner();
+      allow create: if isAdmin() || isIncomingOwner();
+      allow update: if isAdmin() || isDocOwner();
+      allow delete: if isAdmin() || isDocOwner();
+    }
+
+    // =========================================================================
+    // 3. complaints Collection (الشكاوى)
+    // Citizens: can only read/write complaints where userId matches their UID
+    // Admins: full access to all complaints
+    // =========================================================================
+    match /complaints/{complaintId} {
+      allow read: if isAdmin() || isDocOwner();
+      allow create: if isAdmin() || isIncomingOwner();
+      allow update: if isAdmin() || isDocOwner();
+      allow delete: if isAdmin() || isDocOwner();
+    }
+
+    // =========================================================================
+    // 4. reports Collection (البلاغات الميدانية)
+    // Citizens: can only read/write reports where userId matches their UID
+    // Admins: full access to all reports
+    // =========================================================================
+    match /reports/{reportId} {
+      allow read: if isAdmin() || isDocOwner();
+      allow create: if isAdmin() || isIncomingOwner();
+      allow update: if isAdmin() || isDocOwner();
+      allow delete: if isAdmin() || isDocOwner();
+    }
+
+    // =========================================================================
+    // 5. jobs Collection (فرص العمل)
+    // Citizens / Public: can read job openings
+    // Admins: full access to create, update, delete jobs
+    // =========================================================================
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 6. jobApplications Collection (طلبات التوظيف)
+    // Citizens: can only read/write applications where userId matches their UID
+    // Admins: full access to all job applications
+    // =========================================================================
+    match /jobApplications/{applicationId} {
+      allow read: if isAdmin() || isDocOwner();
+      allow create: if isAdmin() || isIncomingOwner();
+      allow update: if isAdmin() || isDocOwner();
+      allow delete: if isAdmin() || isDocOwner();
+    }
+
+    // =========================================================================
+    // 7. socialServices Collection (خدمات الرعاية والمساعدات)
+    // Citizens / Public: can view available social support programs
+    // Admins: full access to create, update, delete services
+    // =========================================================================
+    match /socialServices/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 8. news Collection (الأخبار والبيانات الرسمية)
+    // Citizens / Public: can read all official news and statements
+    // Admins: full access to publish, edit, delete news
+    // =========================================================================
+    match /news/{newsId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 9. notifications Collection (الإشعارات)
+    // Citizens: can read notifications targeted to their UID or broadcasted to 'all'
+    //           can update their own notification (e.g. mark as read)
+    // Admins: full access to all notifications
+    // =========================================================================
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.targetUserId == request.auth.uid ||
+          resource.data.targetUserId == 'all'
+        )
+      );
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        isSignedIn() && resource.data.targetUserId == request.auth.uid
+      );
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 10. messages Collection (الرسائل المباشرة والاستفسارات)
+    // Citizens: can read and write messages where userId matches their UID
+    // Admins: full access to all messages
+    // =========================================================================
+    match /messages/{messageId} {
+      allow read: if isAdmin() || isDocOwner();
+      allow create: if isAdmin() || isIncomingOwner();
+      allow update: if isAdmin() || isDocOwner();
+      allow delete: if isAdmin() || isDocOwner();
+    }
+
+    // =========================================================================
+    // 11. auditLogs Collection (سجلات الرقابة والتدقيق)
+    // Admins: full read and create access to audit trail
+    // Immutable: update and delete operations are restricted
+    // =========================================================================
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false; // Strict audit compliance
+    }
+
+    // =========================================================================
+    // 12. settings Collection (إعدادات المنصة)
+    // Citizens / Public: can read app configuration
+    // Admins: full access to modify settings
+    // =========================================================================
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 13. adminUsers Collection (سجل مدراء النظام والمشرفين)
+    // Authenticated users: can verify admin directory status
+    // Admins: full access to manage administrative accounts
+    // =========================================================================
+    match /adminUsers/{adminEmail} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+  }
+}

@@ -1,0 +1,72 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions for authentication and role validation
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Direct check: primary admin or user with admin role verified in Firestore
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'abraheem630@gmail.com') ||
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Verify document belongs to the requesting authenticated user
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Limit uploaded file sizes and enforce allowed MIME types for document safety
+    function isValidMediaUpload() {
+      return request.resource.size < 15 * 1024 * 1024 // Max 15MB
+          && (
+            request.resource.contentType.matches('image/.*') ||
+            request.resource.contentType == 'application/pdf'
+          );
+    }
+
+    // =========================================================================
+    // 1. Citizen Uploads (Official documents, IDs, medical reports, problem photos)
+    // Structure: uploads/{userId}/{folderName}/{filename}
+    // =========================================================================
+    match /uploads/{userId}/{allPaths=**} {
+      // READ:
+      // - The citizen can view and download their own uploaded documents
+      // - Admins can view all citizens' documents to review requests and complaints
+      allow read: if isOwner(userId) || isAdmin();
+
+      // WRITE:
+      // - Citizens can upload files exclusively to their own user directory
+      // - Enforces safe file sizes and formats (Images and PDFs)
+      allow write: if (isOwner(userId) && isValidMediaUpload()) || isAdmin();
+
+      // DELETE:
+      // - Citizens cannot erase documents once submitted for an official transaction
+      // - Only Admins can purge documents or remove invalid files
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 2. Public Platform Assets (News banners, official logos, infographics)
+    // Structure: public/{folderName}/{filename}
+    // =========================================================================
+    match /public/{allPaths=**} {
+      // Anyone can read public news images and announcements
+      allow read: if true;
+      // Only Admins can upload, modify, or delete public portal assets
+      allow write, delete: if isAdmin() && isValidMediaUpload();
+    }
+
+    // =========================================================================
+    // 3. Fallback / Default Rule
+    // =========================================================================
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
